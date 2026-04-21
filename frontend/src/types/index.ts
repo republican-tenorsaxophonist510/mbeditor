@@ -91,3 +91,17 @@ export interface Toast {
   type: ToastType;
   message: string;
 }
+
+export interface WeChatAccount {
+  id: string;
+  name: string;
+  appid: string;
+  appsecret: string;
+}
+
+export interface LegacyExportBundle {
+  version: 1;
+  exported_at: string;
+  articles: ArticleFull[];
+  mbdocs: { id: string; title: string; data: unknown }[];
+}
