@@ -52,7 +52,7 @@ async def upload_image(
 
 @router.post("/draft")
 async def create_draft(req: DraftReq):
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None,
         publish_draft_sync,
