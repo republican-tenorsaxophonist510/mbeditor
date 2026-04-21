@@ -75,3 +75,14 @@ def test_load_config_and_save_config_are_removed():
     assert not hasattr(wechat_service, "load_config")
     assert not hasattr(wechat_service, "save_config")
     assert not hasattr(wechat_service, "_wx_image_cache")
+
+
+def test_settings_only_expose_max_upload_size():
+    from app.core.config import settings
+    # Public attrs exposed by Settings
+    attrs = {k for k in dir(settings) if not k.startswith("_") and k.isupper()}
+    assert "MAX_UPLOAD_SIZE" in attrs
+    assert "IMAGES_DIR" not in attrs
+    assert "ARTICLES_DIR" not in attrs
+    assert "MBDOCS_DIR" not in attrs
+    assert "CONFIG_FILE" not in attrs

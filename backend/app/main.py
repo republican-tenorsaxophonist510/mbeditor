@@ -1,43 +1,22 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.response import fail
-from app.services.showcase_seed import seed_showcase_templates_if_empty
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Suppress httpx request logging — it prints full URLs including tokens/secrets
 logging.getLogger("httpx").setLevel(logging.WARNING)
-
-
-def ensure_data_directories() -> None:
-    for path in (
-        Path(settings.IMAGES_DIR),
-        Path(settings.ARTICLES_DIR),
-        Path(settings.MBDOCS_DIR),
-        Path(settings.CONFIG_FILE).parent,
-    ):
-        path.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        seeded = seed_showcase_templates_if_empty()
-        if seeded:
-            logger.info("First-run showcase seed wrote %d articles.", seeded)
-    except Exception:  # pragma: no cover - defensive, first-run must never fail boot
-        logger.exception("Showcase seeding failed, continuing with empty article list.")
     yield
     logger.info("Application shutdown complete.")
 
@@ -66,9 +45,6 @@ async def check_upload_size(request: Request, call_next):
             )
     return await call_next(request)
 
-
-ensure_data_directories()
-app.mount("/images", StaticFiles(directory=settings.IMAGES_DIR), name="images")
 
 app.include_router(api_router)
 
