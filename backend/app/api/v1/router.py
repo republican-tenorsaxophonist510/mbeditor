@@ -3,21 +3,14 @@ import time
 import httpx
 from fastapi import APIRouter
 
-from app.api.v1.articles import router as articles_router
-from app.api.v1.images import router as images_router
-from app.api.v1.wechat import router as wechat_router
+from app.api.v1.wechat_stateless import router as wechat_stateless_router
 from app.api.v1.publish import router as publish_router
-from app.api.v1.mbdoc import router as mbdoc_router
 from app.core.config import APP_VERSION, GITHUB_REPO
 from app.core.response import success
 
 api_router = APIRouter(prefix="/api/v1")
-
-api_router.include_router(articles_router)
-api_router.include_router(images_router)
-api_router.include_router(wechat_router)
+api_router.include_router(wechat_stateless_router)
 api_router.include_router(publish_router)
-api_router.include_router(mbdoc_router)
 
 _version_cache: dict = {"latest": "", "checked_at": 0}
 
@@ -29,7 +22,6 @@ async def get_version():
 
 @api_router.get("/version/check")
 async def check_version():
-    """Check for updates via GitHub API (cached for 1 hour)."""
     now = time.time()
     if _version_cache["latest"] and now - _version_cache["checked_at"] < 3600:
         latest = _version_cache["latest"]
@@ -48,7 +40,6 @@ async def check_version():
         except Exception:
             latest = ""
 
-    # Normalize: strip trailing .0 segments so "3.0" == "3.0.0"
     def _norm(v: str) -> str:
         parts = v.split(".")
         while len(parts) > 1 and parts[-1] == "0":
@@ -56,8 +47,4 @@ async def check_version():
         return ".".join(parts)
 
     has_update = bool(latest and _norm(latest) != _norm(APP_VERSION))
-    return success({
-        "current": APP_VERSION,
-        "latest": latest or APP_VERSION,
-        "has_update": has_update,
-    })
+    return success({"current": APP_VERSION, "latest": latest or APP_VERSION, "has_update": has_update})
