@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { IconWechat, IconCheck, IconClose } from "@/components/icons";
 import Chip from "@/components/shared/Chip";
 import { useUIStore, type Theme, type Layout, type Density } from "@/stores/uiStore";
 import { toast } from "@/stores/toastStore";
@@ -288,7 +287,7 @@ function WeChatSection() {
       </button>
 
       {editingId && (
-        <div style={{ marginTop: 16, padding: 12, border: "1px solid #ccc" }}>
+        <div style={{ marginTop: 16, padding: 12, border: "1px solid var(--border)" }}>
           <label>
             名称
             <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
@@ -604,22 +603,3 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  all: "unset",
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box",
-  fontFamily: "var(--f-mono)",
-  fontSize: 13,
-  color: "var(--fg-2)",
-  padding: "8px 0",
-  borderBottom: "1px solid var(--border)",
-  transition: "border-color 0.15s",
-};
-
-// Suppress unused variable warning — inputStyle is available for use in other sections
-void inputStyle;
-// Suppress unused import warning — IconWechat, IconCheck, IconClose available for future use
-void IconWechat;
-void IconCheck;
-void IconClose;
