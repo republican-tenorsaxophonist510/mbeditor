@@ -1,62 +1,51 @@
-import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import SettingsSurface from "./SettingsSurface";
-import { useUIStore } from "@/stores/uiStore";
-
-const getMock = vi.fn();
-const putMock = vi.fn();
-const postMock = vi.fn();
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SettingsSurface } from "./SettingsSurface";
+import { useWeChatStore } from "@/stores/wechatStore";
 
 vi.mock("@/lib/api", () => ({
   default: {
-    get: (...args: unknown[]) => getMock(...args),
-    put: (...args: unknown[]) => putMock(...args),
-    post: (...args: unknown[]) => postMock(...args),
+    post: vi.fn().mockResolvedValue({ data: { code: 0, message: "ok", data: { valid: true } } }),
+    get: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
   },
 }));
 
-describe("SettingsSurface", () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-  });
+beforeEach(() => {
+  localStorage.clear();
+  useWeChatStore.getState().reset();
+});
 
-  beforeEach(() => {
-    window.localStorage.clear();
-    useUIStore.setState({
-      theme: "walnut",
-      density: "comfy",
-      layout: "triptych",
-      editorDefaultMode: "html",
-      editorAutoSave: true,
-      editorFontSize: 14,
-      tweaksOpen: false,
-    });
+describe("SettingsSurface WeChat section", () => {
+  it("adds a new account through the form and persists to store", async () => {
+    render(<SettingsSurface />);
+    fireEvent.click(screen.getByRole("button", { name: /添加公众号|add account/i }));
 
-    getMock.mockImplementation((url: string) => {
-      if (url === "/config") {
-        return Promise.resolve({ data: { code: 0, data: { appid: "", appsecret: "", configured: false } } });
-      }
-      if (url === "/version") {
-        return Promise.resolve({ data: { code: 0, data: { version: "5.0.0", repo: "AAAAAnson/mbeditor" } } });
-      }
-      return Promise.reject(new Error(`unexpected GET ${url}`));
-    });
-    putMock.mockResolvedValue({ data: { code: 0, data: { appid: "wx123", appsecret: "****abcd", configured: true } } });
-    postMock.mockResolvedValue({ data: { code: 0, data: { valid: true } } });
-  });
-
-  it("shows density controls in the appearance section", async () => {
-    render(<SettingsSurface go={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "界面" }));
+    fireEvent.change(screen.getByLabelText(/名称|account name/i), { target: { value: "MB 科技" } });
+    fireEvent.change(screen.getByLabelText(/appid/i), { target: { value: "wxa7b6e6test" } });
+    fireEvent.change(screen.getByLabelText(/appsecret/i), { target: { value: "secret123" } });
+    fireEvent.click(screen.getByRole("button", { name: /保存|save/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /紧凑/ })).toBeInTheDocument();
+      expect(useWeChatStore.getState().accounts).toHaveLength(1);
     });
-    expect(screen.getByRole("button", { name: /舒适/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /宽松/ })).toBeInTheDocument();
+    expect(useWeChatStore.getState().accounts[0].appid).toBe("wxa7b6e6test");
+  });
+
+  it("calls /wechat/test-connection with active account creds", async () => {
+    useWeChatStore.getState().addAccount({ name: "Existing", appid: "wxA", appsecret: "s" });
+    const { default: api } = await import("@/lib/api");
+
+    render(<SettingsSurface />);
+    fireEvent.click(screen.getByRole("button", { name: /测试连接|test connection/i }));
+
+    await waitFor(() => {
+      expect((api.post as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(
+        "/wechat/test-connection",
+        { appid: "wxA", appsecret: "s" },
+      );
+    });
   });
 
   it("renders 图床 nav entry and section", async () => {

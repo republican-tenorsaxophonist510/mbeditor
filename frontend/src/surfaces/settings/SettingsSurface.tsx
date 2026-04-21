@@ -4,6 +4,8 @@ import Chip from "@/components/shared/Chip";
 import { useUIStore, type Theme, type Layout, type Density } from "@/stores/uiStore";
 import { toast } from "@/stores/toastStore";
 import api from "@/lib/api";
+import { useWeChatStore, type WeChatAccount } from "@/stores/wechatStore";
+import { readLegacyBundle, applyLegacyBundle } from "@/lib/legacyImport";
 import type { Route } from "@/types";
 import ImageHostsSection from "./ImageHostsSection";
 
@@ -36,28 +38,18 @@ const DENSITIES: { key: Density; label: string; desc: string }[] = [
 ];
 
 interface Props {
-  go: (route: Route, params?: Record<string, string>) => void;
+  go?: (route: Route, params?: Record<string, string>) => void;
 }
+
+type VersionPayload = {
+  version?: string;
+  repo?: string;
+};
 
 type ApiEnvelope<T> = {
   code?: number;
   message?: string;
   data?: T;
-};
-
-type ConfigPayload = {
-  appid?: string;
-  app_id?: string;
-  appsecret?: string;
-  app_secret?: string;
-  configured?: boolean;
-  account_name?: string;
-  valid?: boolean;
-};
-
-type VersionPayload = {
-  version?: string;
-  repo?: string;
 };
 
 const FALLBACK_REPO = "AAAAAnson/mbeditor";
@@ -100,18 +92,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function normalizeConfig(payload?: ConfigPayload) {
-  const appid = payload?.appid ?? payload?.app_id ?? "";
-  const maskedSecret = payload?.appsecret ?? payload?.app_secret ?? "";
-
-  return {
-    appid,
-    accountName: payload?.account_name ?? "",
-    configured: Boolean(payload?.configured ?? (appid && maskedSecret)),
-    hasStoredSecret: Boolean(maskedSecret),
-  };
-}
-
 function buildRepoUrl(repo?: string): string {
   const normalized = (repo || FALLBACK_REPO).trim();
   if (!normalized) {
@@ -125,7 +105,7 @@ function buildRepoUrl(repo?: string): string {
   return `https://github.com/${normalized.replace(/^github\.com\//, "").replace(/^\/+/, "")}`;
 }
 
-export default function SettingsSurface({ go: _go }: Props) {
+export function SettingsSurface({ go: _go }: Props = {}) {
   const [section, setSection] = useState<Section>("wechat");
 
   return (
@@ -193,132 +173,143 @@ export default function SettingsSurface({ go: _go }: Props) {
   );
 }
 
+export default SettingsSurface;
+
 /* ── WeChat Section ─────────────────────────────── */
 
 function WeChatSection() {
-  const [appId, setAppId] = useState("");
-  const [appSecret, setAppSecret] = useState("");
-  const [configured, setConfigured] = useState(false);
-  const [hasStoredSecret, setHasStoredSecret] = useState(false);
-  const [accountName, setAccountName] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const accounts = useWeChatStore((s) => s.accounts);
+  const activeAccountId = useWeChatStore((s) => s.activeAccountId);
+  const addAccount = useWeChatStore((s) => s.addAccount);
+  const updateAccount = useWeChatStore((s) => s.updateAccount);
+  const removeAccount = useWeChatStore((s) => s.removeAccount);
+  const setActive = useWeChatStore((s) => s.setActive);
 
-  useEffect(() => {
-    api.get("/config").then((res) => {
-      const data = normalizeConfig(unwrapApiData<ConfigPayload>(res.data));
-      setAppId(data.appid);
-      setConfigured(data.configured);
-      setHasStoredSecret(data.hasStoredSecret);
-      setAccountName(data.accountName);
-      setAppSecret("");
-    }).catch(() => {});
-  }, []);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ name: string; appid: string; appsecret: string }>({
+    name: "",
+    appid: "",
+    appsecret: "",
+  });
+  const [testing, setTesting] = useState(false);
+
+  const beginAdd = () => {
+    setEditingId("__new");
+    setDraft({ name: "", appid: "", appsecret: "" });
+  };
+
+  const beginEdit = (a: WeChatAccount) => {
+    setEditingId(a.id);
+    setDraft({ name: a.name, appid: a.appid, appsecret: a.appsecret });
+  };
+
+  const save = () => {
+    const payload = { name: draft.name.trim(), appid: draft.appid.trim(), appsecret: draft.appsecret.trim() };
+    if (!payload.appid || !payload.appsecret) {
+      toast.error("AppID 和 AppSecret 不能为空");
+      return;
+    }
+    if (editingId === "__new") {
+      addAccount(payload);
+    } else if (editingId) {
+      updateAccount(editingId, payload);
+    }
+    setEditingId(null);
+    toast.success("已保存");
+  };
+
+  const cancel = () => setEditingId(null);
 
   const handleTest = async () => {
+    const active = accounts.find((a) => a.id === activeAccountId);
+    if (!active) {
+      toast.error("请先选择一个公众号");
+      return;
+    }
     setTesting(true);
     try {
-      const res = await api.post("/config/test", {
-        appid: appId.trim(),
-        appsecret: appSecret.trim(),
-      });
-      const data = unwrapApiData<ConfigPayload>(res.data);
-
-      setConfigured(true);
-      setHasStoredSecret(true);
-      setAppSecret("");
-      setAccountName(data?.account_name || accountName || "已连接公众号");
+      await api.post("/wechat/test-connection", { appid: active.appid, appsecret: active.appsecret });
       toast.success("连接成功");
-    } catch (error) {
-      toast.error(getErrorMessage(error, "连接失败，请检查 AppID 和 AppSecret"));
+    } catch (err) {
+      toast.error(getErrorMessage(err, "连接失败"));
     } finally {
       setTesting(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     try {
-      const res = await api.put("/config", {
-        appid: appId.trim(),
-        appsecret: appSecret.trim(),
-      });
-      const data = normalizeConfig(unwrapApiData<ConfigPayload>(res.data));
-
-      setConfigured(data.configured);
-      setHasStoredSecret(data.hasStoredSecret);
-      setAppSecret("");
-      if (data.accountName) {
-        setAccountName(data.accountName);
-      }
-      toast.success("设置已保存");
-    } catch (error) {
-      toast.error(getErrorMessage(error, "保存失败，请稍后再试"));
+      const bundle = await readLegacyBundle(file);
+      applyLegacyBundle(bundle);
+      toast.success(`已导入 ${bundle.articles.length} 篇文章，${bundle.mbdocs.length} 个 MBDoc`);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "导入失败"));
     } finally {
-      setSaving(false);
+      e.target.value = "";
     }
   };
 
   return (
-    <div style={{ maxWidth: 520 }}>
-      <SectionHeader label="公众号" />
+    <section>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2>公众号账号</h2>
+        <div>
+          <button onClick={beginAdd}>添加公众号</button>
+          <label style={{ marginLeft: 8, cursor: "pointer" }}>
+            导入旧数据
+            <input type="file" accept="application/json" onChange={handleImport} style={{ display: "none" }} />
+          </label>
+        </div>
+      </header>
 
-      <div className="flex items-center" style={{ gap: 8, marginBottom: 24 }}>
-        <IconWechat size={16} />
-        <span style={{ fontFamily: "var(--f-mono)", fontSize: 12, color: "var(--fg-2)" }}>
-          连接公众号
-        </span>
-        {configured ? (
-          <Chip tone="forest" style={{ marginLeft: "auto" }}>
-            <IconCheck size={10} /> 已配置
-          </Chip>
-        ) : (
-          <Chip tone="warn" style={{ marginLeft: "auto" }}>未配置</Chip>
-        )}
-      </div>
+      <ul>
+        {accounts.map((a) => (
+          <li key={a.id} style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <input
+              type="radio"
+              name="active-account"
+              checked={activeAccountId === a.id}
+              onChange={() => setActive(a.id)}
+            />
+            <div style={{ flex: 1 }}>
+              <div>{a.name || "(未命名)"}</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{a.appid}</div>
+            </div>
+            <button onClick={() => beginEdit(a)}>编辑</button>
+            <button onClick={() => removeAccount(a.id)}>删除</button>
+          </li>
+        ))}
+      </ul>
 
-      {accountName && (
-        <div style={{ marginBottom: 20, padding: "8px 12px", background: "var(--surface-2)", borderRadius: "var(--r-sm)" }}>
-          <span className="caps" style={{ fontSize: 9, color: "var(--fg-4)", letterSpacing: "0.1em" }}>公众号名称</span>
-          <div style={{ fontFamily: "var(--f-mono)", fontSize: 13, color: "var(--fg)", marginTop: 4 }}>{accountName}</div>
+      <button onClick={handleTest} disabled={testing || !activeAccountId}>
+        {testing ? "测试中…" : "测试连接"}
+      </button>
+
+      {editingId && (
+        <div style={{ marginTop: 16, padding: 12, border: "1px solid #ccc" }}>
+          <label>
+            名称
+            <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+          </label>
+          <label>
+            AppID
+            <input value={draft.appid} onChange={(e) => setDraft((d) => ({ ...d, appid: e.target.value }))} />
+          </label>
+          <label>
+            AppSecret
+            <input
+              type="password"
+              value={draft.appsecret}
+              onChange={(e) => setDraft((d) => ({ ...d, appsecret: e.target.value }))}
+            />
+          </label>
+          <button onClick={save}>保存</button>
+          <button onClick={cancel}>取消</button>
         </div>
       )}
-
-      <FieldGroup label="AppID">
-        <input
-          type="text"
-          value={appId}
-          onChange={(e) => setAppId(e.target.value)}
-          placeholder="wx..."
-          style={inputStyle}
-        />
-      </FieldGroup>
-
-      <FieldGroup label="AppSecret">
-        <input
-          type="password"
-          value={appSecret}
-          onChange={(e) => setAppSecret(e.target.value)}
-          placeholder={hasStoredSecret ? "已保存，留空会继续使用当前密钥" : "请输入 AppSecret"}
-          style={inputStyle}
-        />
-      </FieldGroup>
-
-      {hasStoredSecret && (
-        <div style={{ marginTop: -8, marginBottom: 16, fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-4)" }}>
-          当前密钥已经保存。只有输入新值时，才会覆盖原来的密钥。
-        </div>
-      )}
-
-      <div className="flex" style={{ gap: 8, marginTop: 24 }}>
-        <button className="btn btn-ghost btn-sm" onClick={handleTest} disabled={testing || !appId.trim()}>
-          {testing ? "连接中..." : "测试连接"}
-        </button>
-        <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving || !appId.trim()}>
-          {saving ? "保存中..." : "保存设置"}
-        </button>
-      </div>
-    </div>
+    </section>
   );
 }
 
@@ -625,3 +616,10 @@ const inputStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--border)",
   transition: "border-color 0.15s",
 };
+
+// Suppress unused variable warning — inputStyle is available for use in other sections
+void inputStyle;
+// Suppress unused import warning — IconWechat, IconCheck, IconClose available for future use
+void IconWechat;
+void IconCheck;
+void IconClose;
