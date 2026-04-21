@@ -2,8 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Seg from "@/components/ui/Seg";
 import { IconArrowLeft, IconCopy, IconEye, IconSend } from "@/components/icons";
 import { useUIStore } from "@/stores/uiStore";
+import { uploadWithActive } from "@/lib/image-hosts/dispatch";
 import type { EditorDraft, EditorField } from "@/types";
 import type { OutlineBlock } from "./StructurePanel";
+
+export async function dispatchEditorImageUpload(file: File): Promise<string> {
+  const res = await uploadWithActive(file);
+  return res.url;
+}
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 const PREVIEW_EDIT_DEBOUNCE_MS = 500;
@@ -1046,6 +1052,29 @@ export default function CenterStage({
                       commitPreviewChanges(node);
                       setIsPreviewEditing(false);
                     }, PREVIEW_EDIT_DEBOUNCE_MS);
+                  }}
+                  onDragOver={(event) => {
+                    if (event.dataTransfer?.types.includes("Files")) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onDrop={(event) => {
+                    const file = event.dataTransfer?.files?.[0];
+                    if (!file || !file.type.startsWith("image/")) return;
+                    event.preventDefault();
+                    void dispatchEditorImageUpload(file)
+                      .then((url) => {
+                        const node = previewContentRef.current;
+                        if (!node) return;
+                        const img = document.createElement("img");
+                        img.src = url;
+                        img.alt = file.name;
+                        node.appendChild(img);
+                        commitPreviewChanges(node);
+                      })
+                      .catch((err) => {
+                        console.error("image upload failed:", err);
+                      });
                   }}
                   onBlur={(event) => {
                     if (previewEditTimerRef.current) {

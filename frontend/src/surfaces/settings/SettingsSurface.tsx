@@ -5,11 +5,13 @@ import { useUIStore, type Theme, type Layout, type Density } from "@/stores/uiSt
 import { toast } from "@/stores/toastStore";
 import api from "@/lib/api";
 import type { Route } from "@/types";
+import ImageHostsSection from "./ImageHostsSection";
 
-type Section = "wechat" | "appearance" | "editor" | "about";
+type Section = "wechat" | "imagehost" | "appearance" | "editor" | "about";
 
 const NAV_ITEMS: { key: Section; label: string }[] = [
   { key: "wechat", label: "公众号" },
+  { key: "imagehost", label: "图床" },
   { key: "appearance", label: "界面" },
   { key: "editor", label: "编辑" },
   { key: "about", label: "关于" },
@@ -182,6 +184,7 @@ export default function SettingsSurface({ go: _go }: Props) {
       {/* Content */}
       <div style={{ flex: 1, overflow: "auto", padding: 32 }}>
         {section === "wechat" && <WeChatSection />}
+        {section === "imagehost" && <ImageHostsSection />}
         {section === "appearance" && <AppearanceSection />}
         {section === "editor" && <EditorSection />}
         {section === "about" && <AboutSection />}

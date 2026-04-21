@@ -58,4 +58,13 @@ describe("SettingsSurface", () => {
     expect(screen.getByRole("button", { name: /舒适/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /宽松/ })).toBeInTheDocument();
   });
+
+  it("renders 图床 nav entry and section", async () => {
+    render(<SettingsSurface go={vi.fn()} />);
+    const navBtn = screen.getByRole("button", { name: "图床" });
+    fireEvent.click(navBtn);
+    await waitFor(() => {
+      expect(screen.getByTestId("imagehost-section")).toBeInTheDocument();
+    });
+  });
 });
