@@ -83,8 +83,15 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           SHA_TAG: sha-${{ needs.build-and-push.outputs.sha_short }}
+        # Keepalive prevents the ssh session from being dropped during long
+        # silent docker pulls (large GHCR fetches produce no stdout for minutes
+        # at a time, past the server's idle threshold).
         run: |
-          ssh -i ~/.ssh/deploy.pem "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<EOF
+          ssh -i ~/.ssh/deploy.pem \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=20 \
+              -o TCPKeepAlive=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<EOF
           set -euo pipefail
           cd /opt/mbeditor
           export MBEDITOR_TAG="${SHA_TAG}"
@@ -98,8 +105,16 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          scp -i ~/.ssh/deploy.pem scripts/prod-smoke.sh "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/prod-smoke.sh"
-          ssh -i ~/.ssh/deploy.pem "${DEPLOY_USER}@${DEPLOY_HOST}" "chmod +x /tmp/prod-smoke.sh && /tmp/prod-smoke.sh 127.0.0.1 7073 7072"
+          scp -i ~/.ssh/deploy.pem \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=20 \
+              -o TCPKeepAlive=yes \
+              scripts/prod-smoke.sh "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/prod-smoke.sh"
+          ssh -i ~/.ssh/deploy.pem \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=20 \
+              -o TCPKeepAlive=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" "chmod +x /tmp/prod-smoke.sh && /tmp/prod-smoke.sh 127.0.0.1 7073 7072"
 
       - name: Public smoke test
         run: |
