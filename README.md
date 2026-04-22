@@ -6,6 +6,7 @@
 
 **动动嘴，排版就好了。**
 
+[![在线体验](https://img.shields.io/badge/在线体验-mbeditor.mbluostudio.com-00B4D8.svg)](https://mbeditor.mbluostudio.com)
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-一键部署-2496ED.svg)](docker-compose.yml)
 [![AI Agent](https://img.shields.io/badge/Agent-Claude_|_Codex_|_OpenClaw-8B5CF6.svg)](skill/mbeditor.skill.md)
