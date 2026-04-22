@@ -1,6 +1,27 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ArticleFull, ArticleMode, ArticleSummary } from "@/types";
+import { getSeedArticles } from "@/seeds";
+
+const SEED_FLAG_KEY = "mbeditor.articles.seeded";
+
+function shouldSeed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(SEED_FLAG_KEY) !== "1";
+  } catch {
+    return false;
+  }
+}
+
+function markSeeded(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SEED_FLAG_KEY, "1");
+  } catch {
+    /* storage unavailable — fall back to in-memory only */
+  }
+}
 
 type ArticleUpdateData = Partial<Omit<ArticleFull, "id" | "created_at" | "updated_at">>;
 
@@ -106,6 +127,20 @@ export const useArticlesStore = create<ArticlesState>()(
     {
       name: "mbeditor.articles",
       partialize: (state) => ({ articles: state.articles }),
+      onRehydrateStorage: () => (state) => {
+        if (!shouldSeed()) return;
+        if (state && state.articles.length > 0) {
+          markSeeded();
+          return;
+        }
+        const seeds = getSeedArticles();
+        markSeeded();
+        if (state) {
+          state.articles = seeds;
+        } else {
+          useArticlesStore.setState({ articles: seeds });
+        }
+      },
     }
   )
 );
