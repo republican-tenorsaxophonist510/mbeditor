@@ -288,7 +288,7 @@ export function ArticleList({ go = () => {} }: ArticleListProps) {
                 fontFamily: "var(--f-display)",
               }}
             >
-              已连接本地服务
+              首款原生支持CLI操作的开源公众号编辑器
             </div>
           </div>
         </div>
