@@ -954,6 +954,55 @@ describe("CenterStage", () => {
     expect(nextHtml).not.toContain("font-size:16px; line-height:1.8; color:#333");
   });
 
+  it("strips lone surrogates and C0 control chars when pasting into the HTML source textarea", () => {
+    // The textarea also feeds draft.html. Rich-text pastes from Word /
+    // the open web can drop invalid Unicode there, which then reaches
+    // /publish/preview and 422s. Guard at the onChange boundary.
+    const onFieldChange = vi.fn();
+
+    render(
+      <CenterStage
+        articleId="draft-1"
+        canGoBack
+        draft={DRAFT}
+        view="code"
+        setView={vi.fn()}
+        tab="html"
+        setTab={vi.fn()}
+        saveState="saved"
+        selected="body"
+        navigationRequest={null}
+        previewHtml={PROCESSED_PREVIEW_HTML}
+        previewLoading={false}
+        previewError={null}
+        publishing={false}
+        copying={false}
+        onBack={vi.fn()}
+        onFieldChange={onFieldChange}
+        onRefreshPreview={vi.fn()}
+        onCopyRichText={vi.fn()}
+        onPublish={vi.fn()}
+      />
+    );
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(textarea, {
+      target: {
+        value: "<p>clean \uD83D bad surrogate \u0008 and ctrl\nlinebreak\tkept</p>",
+      },
+    });
+
+    expect(onFieldChange).toHaveBeenCalled();
+    const lastCall = onFieldChange.mock.calls[onFieldChange.mock.calls.length - 1];
+    const [field, value] = lastCall;
+    expect(field).toBe("html");
+    expect(value).not.toMatch(/[\uD800-\uDFFF]/);
+    expect(value).not.toContain("\u0008");
+    expect(value).toContain("clean");
+    expect(value).toContain("linebreak"); // \n preserved
+    expect(value).toContain("kept"); // \t preserved
+  });
+
   it("strips lone surrogates and C0 control chars from committed preview edits", () => {
     vi.useFakeTimers();
     const onFieldChange = vi.fn();

@@ -957,7 +957,17 @@ export default function CenterStage({
               <textarea
                 ref={textareaRef}
                 value={currentCode}
-                onChange={(event) => onFieldChange(activeTab as EditorField, event.target.value)}
+                onChange={(event) => {
+                  // Rich-text pastes into the HTML / CSS / JS source
+                  // textarea can drop lone surrogates and C0 control chars
+                  // straight into draft.html. /publish/preview then 422s
+                  // because Pydantic v2 rejects invalid Unicode. Cheap to
+                  // run on every keystroke (plain typing is a no-op).
+                  onFieldChange(
+                    activeTab as EditorField,
+                    stripUnsafeUnicode(event.target.value),
+                  );
+                }}
                 spellCheck={false}
                 style={{
                   flex: 1,
