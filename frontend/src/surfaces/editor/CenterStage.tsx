@@ -2,8 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Seg from "@/components/ui/Seg";
 import { IconArrowLeft, IconCopy, IconEye, IconSend } from "@/components/icons";
 import CompatibilityBadge from "@/components/validation/CompatibilityBadge";
+import ValidationBlockDialog from "@/components/validation/ValidationBlockDialog";
+import { toast } from "@/stores/toastStore";
 import { useUIStore } from "@/stores/uiStore";
 import { uploadWithActive } from "@/lib/image-hosts/dispatch";
+import {
+  reportIsBlocking,
+  validateWechatHtml,
+  type ValidationReport,
+} from "@/lib/wechat-validate";
 import type { EditorDraft, EditorField } from "@/types";
 import type { OutlineBlock } from "./StructurePanel";
 
@@ -579,6 +586,76 @@ export default function CenterStage({
   } | null>(null);
   const [previewResizeDirection, setPreviewResizeDirection] = useState<PreviewResizeDirection | null>(null);
   const [isPreviewEditing, setIsPreviewEditing] = useState(false);
+  const [copyLintRunning, setCopyLintRunning] = useState(false);
+  const [copyBlockReport, setCopyBlockReport] = useState<ValidationReport | null>(null);
+  const copyLintAbortRef = useRef<AbortController | null>(null);
+  const copyDebugAllowForce = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("mbeditor.debug.forceCopy") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyLintAbortRef.current) {
+        copyLintAbortRef.current.abort();
+        copyLintAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  // 复制富文本 pre-flight: run the WeChat compatibility validator before
+  // handing off to the (parent-owned) copy pipeline. Hard issues block the
+  // action and surface a dialog; warnings pass through with a toast;
+  // validator failures fail-open so a broken backend never wedges the
+  // editor.
+  const handleCopyWithValidation = async () => {
+    if (!articleId || copying || copyLintRunning) return;
+
+    if (copyLintAbortRef.current) {
+      copyLintAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    copyLintAbortRef.current = controller;
+    setCopyLintRunning(true);
+
+    try {
+      const result = await validateWechatHtml(draft.html ?? "", { signal: controller.signal });
+      if (copyLintAbortRef.current !== controller) return;
+
+      if (!result.ok) {
+        if (result.error === "aborted") return;
+        console.warn("wechat validator unavailable, skipping pre-flight:", result.error);
+        toast.info("校验服务不可用，已跳过");
+        onCopyRichText();
+        return;
+      }
+
+      if (reportIsBlocking(result.report)) {
+        setCopyBlockReport(result.report);
+        return;
+      }
+
+      if (result.report.warnings.length > 0) {
+        toast.info(`有 ${result.report.warnings.length} 条建议但未阻断`);
+      }
+
+      onCopyRichText();
+    } finally {
+      if (copyLintAbortRef.current === controller) {
+        copyLintAbortRef.current = null;
+      }
+      setCopyLintRunning(false);
+    }
+  };
+
+  const forceCopyIgnoringIssues = () => {
+    setCopyBlockReport(null);
+    onCopyRichText();
+  };
   const tabs = draft.mode === "markdown"
     ? ["markdown", "css", "js"]
     : ["html", "css", "js"];
@@ -856,10 +933,10 @@ export default function CenterStage({
         </button>
         <button
           className="btn btn-outline btn-sm"
-          onClick={onCopyRichText}
-          disabled={!articleId || copying}
+          onClick={handleCopyWithValidation}
+          disabled={!articleId || copying || copyLintRunning}
         >
-          <IconCopy size={12} /> {copying ? "复制中" : "复制富文本"}
+          <IconCopy size={12} /> {copying ? "复制中" : copyLintRunning ? "校验中…" : "复制富文本"}
         </button>
         <CompatibilityBadge html={draft.html} />
         <button
@@ -1316,6 +1393,15 @@ export default function CenterStage({
         <span>&middot; {(new Blob([draft.html + draft.css + draft.js + draft.markdown]).size / 1024).toFixed(1)}KB</span>
         <span>&middot; 文章 {articleId?.toUpperCase() ?? "未打开"}</span>
       </div>
+
+      <ValidationBlockDialog
+        open={copyBlockReport !== null}
+        report={copyBlockReport}
+        action="copy"
+        onClose={() => setCopyBlockReport(null)}
+        onForceContinue={copyDebugAllowForce ? forceCopyIgnoringIssues : undefined}
+        allowForce={copyDebugAllowForce}
+      />
     </div>
   );
 }

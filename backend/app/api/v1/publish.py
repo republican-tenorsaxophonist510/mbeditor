@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -29,7 +31,21 @@ async def preview_wechat(req: PreviewReq):
 
 @router.post("/process-for-copy")
 async def process_html_for_copy(req: ProcessForCopyReq):
-    processed = publish_adapter.process_html_for_copy(
-        req.html, req.css, appid=req.appid, appsecret=req.appsecret,
+    # ``process_html_for_copy`` performs blocking sync-httpx uploads to the
+    # local image-bed inside ``process_html_images_via_imgbed``; calling it
+    # directly would stall the asyncio event loop for the duration of every
+    # <img> fetch. Offload to the default thread-pool executor — same pattern
+    # the ``/wechat/draft`` route uses for its sync work.
+    #
+    # Note: no Playwright rasterize step anymore. WeChat-safe SVG is authored
+    # correctly up-front; ``validate_html`` runs inside the adapter and its
+    # report is returned to the caller. The frontend is responsible for hard-
+    # gating on ``report.issues`` — backend only reports, never blocks.
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: publish_adapter.process_html_for_copy(
+            req.html, req.css, appid=req.appid, appsecret=req.appsecret,
+        ),
     )
-    return success({"html": processed})
+    return success({"html": result["html"], "report": result["report"]})

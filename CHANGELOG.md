@@ -2,6 +2,52 @@
 
 All notable changes to MBEditor will be documented in this file.
 
+## [5.3.0] - 2026-04-24
+
+### Added — 微信公众号 SVG 兼容
+- 新增 `wechat-svg-author` / `wechat-svg-validate` 两支 skill，覆盖编辑期到发布前的 SVG 兼容性约束（白名单 hero、双触点 CTA、零高栈、伸缩手风琴、穿透 hotspot 五类合规模板存放在 `docs/wechat-svg/templates/`）。
+- 后端新增 `/wechat/validate` 路由，引入 `svg_validator`：编辑器实时弹兼容性 badge，发布前阻断不合规 SVG。
+- 后端新增 `/agent/generate` 路由 + `agent_svg_prompt`：可由 Agent 直接产出符合 WeChat 兼容白名单的 SVG。
+- 后端新增 `raster_inline_svgs` + `wechat_copy_images` 服务：复制富文本时把内联 SVG 栅格化、把所有图片中转上传到本地 imgbed，确保粘到公众号后台后图片 URL 全部走 `mmbiz.qpic.cn` 重新拉取。
+
+### Added — Local imgbed
+- 后端新增 `local_imgbed_service`，直连 NAS 局域网内的 `local-imgbed`（端口 9697），复制富文本时自动上图。`docker-compose.yml` 通过 `LOCAL_IMGBED_UPLOAD_URL` 注入，公网走 VPS 域名时不可用（微信粘贴拒绝第三方公网图片）。
+
+### Added — 复制富文本流程
+- 校验前置（`CenterStage.handleCopyWithValidation`）：复制按钮先跑 wechat 校验器；阻断级问题弹 `ValidationBlockDialog`，警告级仅 toast，强制复制走 `forceCopyIgnoringIssues`。
+- 复制完成弹 `CopyReadyDialog`，承担"用户手势已过期"问题：服务端处理后由用户在弹窗里再点一次完成 `clipboard.write`。
+
+### Added — 编辑器
+- LintSidebar：发布前可视化展示 wechat 校验器报的所有 issue（位置、级别、修复建议）。
+- AgentCopilot：接 `/agent/generate`，可让 Agent 产出 SVG 直接插入文档；带 SVG 生成测试覆盖。
+- TemplateGallery：5 套合规 SVG 模板内置，一键插入。
+- C 盘清理范例文章 `tpl_cdrive_cleanup.json` 加入 seed 列表，作为 `REQUIRED_SEED_IDS` 强制同步示例。
+
+### Changed — Stateless 架构落地
+- 后端彻底去掉 `/articles` / `/mbdocs` / `/images` CRUD 路由，后端只剩 publish / wechat / validate / agent / version。
+- 前端文章/草稿/微信账号全部走 zustand persist：`articlesStore`（local-first 持久化）、`mbdocStore`、`wechatStore` 三个 store 写 localStorage。
+- 复制富文本与发布草稿都改为前端把账号凭据 + article payload 直接 POST 给后端 stateless 端点。
+- 历史用户从老版本迁移：`scripts/export_legacy_data.py` 一次性导出 + `frontend/src/lib/legacyImport.ts` 在 SettingsSurface 里一键导入。
+
+### Changed — Seed
+- `articlesStore.onRehydrateStorage` 加入 `SEED_VERSION` + `REQUIRED_SEED_IDS` 机制：版本号在 `frontend/src/seeds/index.ts` 里 bump 后，下次 rehydrate 强制把 `REQUIRED_SEED_IDS` 里的文章覆盖为最新 seed 内容。当前 `SEED_VERSION = 5`，强制同步 `cdrive-cleanup`。
+
+### Fixed — 复制富文本主题色泄漏（v5.3 关键修复）
+- 暗色主题下复制富文本到 mp.weixin.qq.com 后，所有 `<p>` 都被微信 paste handler 烙上 `background-color: rgb(20, 16, 19)`（mbeditor walnut 主题的 chrome bg），渲染成黑底文字。
+- 根因：微信粘贴处理器对每个元素跑 `getComputedStyle()` 并 inline 全部解析后的属性，包括从祖先继承解析出的 background-color。
+- 修复：`frontend/src/utils/clipboard.ts writeHtmlToClipboard` 写剪贴板前调用 `stripThemeChromeBackgrounds`，读取当前主题的 `--bg / --bg-deep / --surface / --surface-3`（跳过 `--surface-2` 因为 paper 主题是 `#FFFFFF` 会误伤），DOMParser 解析后剥掉所有匹配这些值的 `background-color`。
+- 边界：作者主动写出与当前主题 chrome 变量完全相同的 hex 会被剥；这种碰撞极小概率发生，换近似色即可规避。
+
+### Fixed — 编辑器
+- 预览编辑保留 inline 样式 + 修好 Ctrl+Z。
+- 富文本粘贴进 HTML 源码 textarea 时同步走 sanitizer。
+- 复制富文本时 null-coerce draft 字符串字段，绕过未绑定公众号场景下的 422。
+- 前端 axios 走 `127.0.0.1` 而非 `localhost`，规避 IPv6 first 解析延迟。
+
+### Infrastructure
+- 部署 workflow 加 SSH keepalive，长 GHCR 拉取过程中 SSH 不再超时。
+- TopBar 增加 GitHub 链接 + 站点 tagline 同步产品定位。
+
 ## [5.0.0] - 2026-04-20
 
 ### Added — 编辑器所见即所得

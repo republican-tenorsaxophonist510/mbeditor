@@ -10,10 +10,21 @@ import type { ApiResponse, ArticleFull, ArticleMode, EditorDraft, EditorField, R
 import StructurePanel, { type OutlineBlock } from "./StructurePanel";
 import CenterStage from "./CenterStage";
 import ValidationDialog from "@/components/validation/ValidationDialog";
+import ValidationBlockDialog from "@/components/validation/ValidationBlockDialog";
 import type { ValidationReport } from "@/components/validation/types";
+import { reportIsBlocking, validateWechatHtml } from "@/lib/wechat-validate";
+import LintSidebar from "@/features/editor/lint/LintSidebar";
+import PublishProgress from "@/components/progress/PublishProgress";
+import CopyReadyDialog from "@/components/progress/CopyReadyDialog";
 
 // Endpoint constants — avoids forbidden-string scanner hits on legacy path substrings
 const COPY_ENDPOINT = "/publish/" + "process-for-copy";
+
+// Both the wechat-draft endpoint and the process-for-copy endpoint include a headless
+// Chromium pass (SVG rasterization) + WeChat material uploads, which easily
+// runs past the default 30s. Give them a generous ceiling; the progress
+// overlay already tells the user the request is still alive.
+const LONG_PUBLISH_TIMEOUT_MS = 300_000;
 
 const EMPTY_DRAFT: EditorDraft = {
   title: "",
@@ -193,6 +204,15 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
   const [navigationRequest, setNavigationRequest] = useState<{ block: OutlineBlock; seq: number } | null>(null);
   const [validationReport, setValidationReport] = useState<ValidationReport | null>(null);
   const [pendingPublish, setPendingPublish] = useState<null | (() => Promise<void>)>(null);
+  const [draftBlockReport, setDraftBlockReport] = useState<ValidationReport | null>(null);
+  const draftDebugAllowForce = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("mbeditor.debug.forceDraft") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
 
   const saveNonceRef = useRef(0);
   const navigationSeqRef = useRef(0);
@@ -352,6 +372,7 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
   }, [draft.mode]);
 
   const [copying, setCopying] = useState(false);
+  const [copyReadyHtml, setCopyReadyHtml] = useState<string | null>(null);
 
   const handleCopyRichText = async () => {
     if (!articleId || !article) return;
@@ -365,20 +386,28 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
       await saveDraftNow(draft, false);
 
       const payload = buildSavePayload(draft);
-      const res = await api.post<ApiResponse<{ html: string }>>(COPY_ENDPOINT, {
-        html: payload.html ?? "",
-        css: draft.css ?? "",
-        appid: active?.appid ?? "",
-        appsecret: active?.appsecret ?? "",
-      });
+      const res = await api.post<ApiResponse<{ html: string }>>(
+        COPY_ENDPOINT,
+        {
+          html: payload.html ?? "",
+          css: draft.css ?? "",
+          appid: active?.appid ?? "",
+          appsecret: active?.appsecret ?? "",
+        },
+        { timeout: LONG_PUBLISH_TIMEOUT_MS },
+      );
       const data = unwrapResponse(res.data);
 
-      await writeHtmlToClipboard(data.html);
-      toast.success(
-        active
-          ? "已复制富文本，可直接粘贴到公众号编辑器"
-          : "已复制富文本（未绑定公众号，图片未上传到素材库）",
-      );
+      // Hand the processed HTML to CopyReadyDialog instead of writing it
+      // here. execCommand('copy') + navigator.clipboard.write both refuse
+      // once the user gesture from the toolbar click has expired (and we're
+      // on plain http so the async Clipboard API is also blocked). Making
+      // the user click a second, fresh button is the only way this reliably
+      // writes rich text on a LAN/non-HTTPS deploy.
+      setCopyReadyHtml(data.html);
+      if (!active) {
+        toast.info("未绑定公众号：图片未上传到素材库");
+      }
     } catch (error) {
       toast.error(extractErrorMessage(error));
     } finally {
@@ -402,41 +431,49 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
       const payload = buildSavePayload(draft);
 
       const pushDraft = async () => {
-        const res = await api.post<ApiResponse<{ media_id: string }>>("/wechat/draft", {
-          appid: active.appid,
-          appsecret: active.appsecret,
-          article: {
-            title: draft.title,
-            html: payload.html,
-            css: draft.css,
-            author: draft.author,
-            digest: draft.digest,
-            cover: article.cover ?? "",
-            mode: draft.mode,
-            markdown: draft.markdown,
+        const res = await api.post<ApiResponse<{ media_id: string }>>(
+          "/wechat/draft",
+          {
+            appid: active.appid,
+            appsecret: active.appsecret,
+            article: {
+              title: draft.title,
+              html: payload.html,
+              css: draft.css,
+              author: draft.author,
+              digest: draft.digest,
+              cover: article.cover ?? "",
+              mode: draft.mode,
+              markdown: draft.markdown,
+            },
           },
-        });
+          { timeout: LONG_PUBLISH_TIMEOUT_MS },
+        );
         const data = unwrapResponse(res.data);
         toast.success(`已发送到微信草稿箱 · ${data.media_id}`);
       };
 
       // Pre-flight: static compatibility check. Never mutates user content.
-      // Agent callers can hit the same endpoint directly before publishing.
-      let report: ValidationReport | null = null;
-      try {
-        const vres = await api.post<ApiResponse<ValidationReport>>("/wechat/validate", {
-          html: payload.html,
-        });
-        report = unwrapResponse(vres.data);
-      } catch {
-        report = null;
+      // Hard gate on ``issues`` (WeChat will silently strip them); warnings
+      // surface as a toast and let the push proceed. Validator failures
+      // fail-open — we never want a broken backend to wedge publishing.
+      const vres = await validateWechatHtml(payload.html ?? "");
+      if (!vres.ok) {
+        console.warn("wechat validator unavailable, skipping pre-flight:", vres.error);
+        toast.info("校验服务不可用，已跳过");
+        await pushDraft();
+        return;
       }
 
-      if (report && (report.issues.length > 0 || report.warnings.length > 0)) {
-        setValidationReport(report);
+      if (reportIsBlocking(vres.report)) {
+        setDraftBlockReport(vres.report);
         setPendingPublish(() => pushDraft);
         setPublishing(false);
         return;
+      }
+
+      if (vres.report.warnings.length > 0) {
+        toast.info(`有 ${vres.report.warnings.length} 条建议但未阻断`);
       }
 
       await pushDraft();
@@ -547,11 +584,13 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
     );
   }
 
+  const gridTemplate = showStructurePanel ? "280px 1fr auto" : "1fr auto";
+
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: showStructurePanel ? "280px 1fr" : "1fr",
+        gridTemplateColumns: gridTemplate,
         height: "100%",
         minHeight: 0,
       }}
@@ -565,6 +604,7 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
           onSelectBlock={handleSelectOutlineBlock}
           onTitleChange={(title) => handleFieldChange("title", title)}
           onModeChange={(mode) => handleFieldChange("mode", mode)}
+          onInsertHtml={(html) => handleFieldChange("html", html)}
         />
       )}
 
@@ -593,12 +633,50 @@ export default function EditorSurface({ articleId, go, canGoBack, onBack }: Edit
         onPublish={handlePublish}
       />
 
+      <LintSidebar html={draft.html} enabled={Boolean(articleId && article)} />
+
       <ValidationDialog
         open={validationReport !== null}
         report={validationReport}
         pushing={publishing}
         onCancel={handleValidationCancel}
         onIgnoreAndPush={handleValidationIgnore}
+      />
+
+      <ValidationBlockDialog
+        open={draftBlockReport !== null}
+        report={draftBlockReport}
+        action="draft"
+        onClose={() => {
+          setDraftBlockReport(null);
+          setPendingPublish(null);
+        }}
+        onForceContinue={
+          draftDebugAllowForce && pendingPublish
+            ? () => {
+                const pending = pendingPublish;
+                setDraftBlockReport(null);
+                setPendingPublish(null);
+                if (!pending) return;
+                setPublishing(true);
+                void pending()
+                  .catch((error) => toast.error(extractErrorMessage(error)))
+                  .finally(() => setPublishing(false));
+              }
+            : undefined
+        }
+        allowForce={draftDebugAllowForce}
+      />
+
+      <PublishProgress
+        open={(publishing || copying) && validationReport === null && draftBlockReport === null}
+        mode={publishing ? "draft" : "copy"}
+      />
+
+      <CopyReadyDialog
+        open={copyReadyHtml !== null}
+        html={copyReadyHtml}
+        onClose={() => setCopyReadyHtml(null)}
       />
     </div>
   );

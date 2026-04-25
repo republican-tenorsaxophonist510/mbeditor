@@ -15,6 +15,16 @@ services:
       - "7072:8000"
     environment:
       - MAX_UPLOAD_SIZE=52428800
+      # 图片上传目标：NAS 局域网内的 local-imgbed 容器（端口 9697）。
+      # 选 LAN 不选公网 VPS 的原因——和 doocs-md 走同一套：imgbed 返回 LAN URL，
+      # 浏览器在局域网里把图送给 mp.weixin.qq.com 的粘贴处理器，由它转存 mmbiz。
+      # 走 https://mbluostudio.com/imgbed/ 时 WeChat 的粘贴处理器会报"拉取图片
+      # 数据失败"——微信不信任第三方公网域名做 paste rehost。
+      # 代价：mbeditor 前端如果从公网访问（mbeditor.mbluostudio.com），浏览器
+      # 抓不到 LAN URL，复制富文本就失效；和 md 一样绑 LAN。
+      - LOCAL_IMGBED_UPLOAD_URL=http://192.168.31.199:9697/upload
+      # LAN 图床无鉴权，不用 token；保留 env 读取为了兼容未来重回公网的场景。
+      - LOCAL_IMGBED_UPLOAD_TOKEN=${LOCAL_IMGBED_UPLOAD_TOKEN:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/version')"]
       interval: 5s

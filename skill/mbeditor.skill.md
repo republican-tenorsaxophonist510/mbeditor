@@ -1,6 +1,6 @@
 ---
 name: mbeditor
-description: "MBEditor 助手使用说明：适用于公众号文章写作、渲染、预览、发布、图片流程以及架构相关改动。"
+description: "MBEditor 编辑器架构、发布流水线、Article↔MBDoc 迁移、块渲染器、CLI 相关任务的入口。"
 user-invocable: true
 metadata:
   openclaw:
@@ -11,251 +11,134 @@ metadata:
 
 # MBEditor 助手技能
 
-## 触发时机
+## 范围边界
 
-Use this skill when the user asks to:
+本 skill 只讲三件事：编辑器架构、发布流水线、`Article` ↔ `MBDoc` 迁移。
 
-- write, edit, render, preview, export, or publish a WeChat article
-- build or modify MBEditor itself
-- work on article/image/config APIs
-- work on `MBDoc`, WeChat-safe rendering, or agent-driven document generation
+- 需要产出微信公众号安全的交互式 SVG 块？读 `skill/wechat-svg-author.skill.md`。
+- 需要把已写好的 HTML/SVG 过一遍发布前校验？读 `skill/wechat-svg-validate.skill.md`。
+
+上层心智模型和路由分流见项目根目录 `AGENTS.md`。
 
 ## 当前事实
 
-Hold these facts at the same time:
+同时持有以下四个事实：
 
-1. The shipped product still runs on legacy `Article`.
-2. The target architecture is block-based `MBDoc`.
-3. Preview, copy, and publish already depend on backend processing.
-4. Migration is incomplete. Do not assume frontend or publish flow is fully `MBDoc`-native.
+1. 在线产品仍跑在旧的 `Article` 模型上。
+2. 目标架构是块式 `MBDoc`，后端已有 schema、存储、registry、渲染入口，但没有独立 CRUD 路由。
+3. 预览、复制、发布都已经依赖后端处理。
+4. 迁移未完成。不要假设前端或发布链路已经 `MBDoc`-native。
 
-Read first:
-
-1. `docs/architecture/SESSION_ONRAMP.md`
-2. `docs/architecture/PROJECT_MAP.md`
-3. `docs/agent/AGENT_WORKFLOWS.md`
-4. `docs/agent/RENDER_DECISIONS.md`
+先读 `docs/architecture/SESSION_ONRAMP.md`、`docs/architecture/PROJECT_MAP.md`、`docs/agent/AGENT_WORKFLOWS.md`、`docs/agent/RENDER_DECISIONS.md`。
 
 ## 路径判断
 
-Before you act, classify the task:
+动手之前先分类：
 
-- Lane A: current product behavior
-  Work from legacy `Article`, `/articles`, and `/publish`.
-- Lane B: migration architecture
-  Work from `MBDoc`, block renderers, and render convergence.
-- Lane C: bridge work
-  Define explicit compatibility between `Article` and `MBDoc` before editing.
+- Lane A：改现网产品行为。从 `Article`、`/publish` 出发。
+- Lane B：推进迁移架构。从 `MBDoc`、块渲染器、渲染收敛出发。
+- Lane C：桥接。先显式定义 `Article` 与 `MBDoc` 的兼容边界再动代码。
 
-If you skip this step, changes drift across both systems.
+跳过这步，改动会在两套体系之间漂移。
 
 ## 入口顺序
 
-For code tasks, inspect in this order:
+看代码按这个顺序切入：
 
 1. `backend/app/api/v1/publish.py`
-2. `backend/app/api/v1/mbdoc.py`
-3. `backend/app/services/render_for_wechat.py`
-4. `backend/app/services/block_registry.py`
-5. `frontend/src/pages/Editor.tsx`
-6. `frontend/src/components/preview/WechatPreview.tsx`
-7. `frontend/src/components/panel/ActionPanel.tsx`
+2. `backend/app/api/v1/wechat_stateless.py`
+3. `backend/app/api/v1/validate.py`
+4. `backend/app/services/publish_adapter.py`
+5. `backend/app/services/legacy_render_pipeline.py`
+6. `backend/app/services/render_for_wechat.py`
+7. `backend/app/services/block_registry.py`
+8. `backend/app/models/mbdoc.py`
+9. `frontend/src/surfaces/editor/EditorSurface.tsx`
+10. `frontend/src/surfaces/editor/CenterStage.tsx`
+11. `frontend/src/surfaces/editor/StructurePanel.tsx`
+12. `frontend/src/surfaces/editor/AgentCopilot.tsx`
 
 ## CLI 优先规则
 
-MBEditor is moving to an agent-first `mbeditor` CLI.
+MBEditor 在向 agent-first 的 `mbeditor` CLI 过渡。
 
-Use this rule:
+按下列优先级：
 
-- If `mbeditor --help` works in the current checkout, prefer CLI.
-- If `mbeditor` is not installed yet but backend deps are available, try `python -m app.cli --help` from `backend/`.
-- If the CLI is not available yet, use the existing HTTP API.
-- Do not promise CLI commands unless they exist in the current workspace.
+- 若 `mbeditor --help` 在当前 checkout 可跑，优先 CLI。
+- 若 `mbeditor` 未安装但后端依赖可用，从 `backend/` 试 `python -m app.cli --help`。
+- 两者都跑不起来，就回退到直接打 HTTP API。
+- 不要承诺当前工作区里不存在的 CLI 命令。
 
-CLI design docs:
-
-- `docs/cli/CLI_OVERVIEW.md`
-- `docs/cli/CLI_ANYTHING_NOTES.md`
+CLI 设计文档：`docs/cli/CLI_OVERVIEW.md`、`docs/cli/CLI_ANYTHING_NOTES.md`、`docs/cli/COMMAND_REFERENCE.md`。
 
 ## 当前接口
 
-Current runtime surfaces:
+运行时入口：
 
-- Web UI: `http://localhost:7073`
-- API base: `http://localhost:7072/api/v1`
+- Web UI：`http://localhost:7073`
+- API base：`http://localhost:7072/api/v1`
 
-Current stable routes:
+当前已实现的后端路由：
 
-- `/articles`
-- `/publish`
-- `/images`
-- `/wechat`
-- `/mbdoc`
+- `/publish/preview` — 预览用 HTML 处理
+- `/publish/process-for-copy` — 复制富文本所需的完整净化 + 图床 + SVG 栅格化
+- `/wechat/test-connection`、`/wechat/upload-image`、`/wechat/draft` — 公众号操作
+- `/wechat/validate` — 发布前兼容性校验（`svg_validator`）
+- `/version`、`/version/check`
 
-Current data reality:
-
-- legacy articles are the live product path
-- `MBDoc` renderer coverage now includes all built-in block types, but frontend authoring is still bridge-first and `raster` is still on its migration-phase fallback path
+注意：`Article`、`MBDoc`、`image` 等 CRUD 已不再暴露为独立路由，前端直接用本地 store + 发布端点。
 
 ## 文档模型规则
 
-Use the right source of truth for the job:
+按任务选 source of truth：
 
-- editing current shipped behavior: treat `Article` as canonical
-- implementing migration layers: `Article` may project into `MBDoc`
-- future-native block work: `MBDoc` should become canonical
+- 动现网已上线行为：`Article` 是权威。
+- 写迁移桥接层：允许 `Article` 投影到 `MBDoc`。
+- 面向未来的块编辑：`MBDoc` 应成为权威。
 
-Do not dual-write `Article` and `MBDoc` as equal truths.
+不要把 `Article` 和 `MBDoc` 当平级双写。
 
 ## 渲染真相规则
 
-Never let these paths diverge without an explicit reason:
+没有明确理由，预览、复制/导出、发布/草稿这三条路径不能发散。长期目标：三者消费同一份渲染结果。现状：仍在收敛中。
 
-- preview
-- copy/export
-- publish/draft
+## 高风险文件
 
-Long-term rule: all three should consume one render result.
-
-Short-term reality: the project is still converging there.
-
-## HTML / SVG / Raster Decision
-
-Choose the lowest layer that can express the result safely.
-
-1. Use HTML first.
-   Best for text, layout, lists, callouts, tables, simple cards, normal images.
-2. Use SVG next.
-   Best for vector illustration, decorative geometry, simple click-triggered visual changes.
-3. Use raster only when HTML and SVG cannot represent the output.
-   Best for effects that must be pixel-exact and are not meaningfully editable as WeChat-safe markup.
-
-Prefer preserving selectable text over rasterizing it.
-
-Detailed guidance:
-
-- `docs/agent/RENDER_DECISIONS.md`
-
-## WeChat Safety Rules
-
-Assume WeChat is hostile to web-platform richness.
-
-Default rules:
-
-- inline styles beat external CSS
-- do not rely on script execution
-- do not rely on unsupported selectors or pseudo-element tricks
-- do not assume complex browser layout survives unchanged
-- validate against actual publish flow, not just local preview
-
-If the user asks for complex visuals, reason through HTML -> SVG -> raster in that order.
-
-## Current High-Risk Files
-
-Treat these as architectural seams, not routine leaf files:
+改动以下文件要当作架构缝线，不是普通叶子节点：
 
 - `backend/app/api/v1/publish.py`
+- `backend/app/services/publish_adapter.py`
+- `backend/app/services/legacy_render_pipeline.py`
 - `backend/app/services/wechat_service.py`
+- `backend/app/services/wechat_sanitize.py`
+- `backend/app/services/render_for_wechat.py`
 - `backend/app/services/block_registry.py`
-- `frontend/src/pages/Editor.tsx`
-- `frontend/src/components/preview/WechatPreview.tsx`
-- `frontend/src/components/panel/ActionPanel.tsx`
-- `frontend/src/components/ui/PublishModal.tsx`
+- `frontend/src/surfaces/editor/EditorSurface.tsx`
+- `frontend/src/surfaces/editor/CenterStage.tsx`
+- `frontend/src/surfaces/editor/AgentCopilot.tsx`
 
-## Working Rules
+## 工作规则
 
-- Do not rewrite the UI shell first.
-- Do not remove `/articles` or `/publish` early.
-- Do not move preview to `MBDoc` while copy/publish stay legacy.
-- Do not expand `publish.py`; shrink and isolate it.
-- Do not assume research docs describe current runtime exactly.
-- Keep agent instructions short here; move depth into docs.
+- 不要先重写 UI 外壳。
+- 不要提前移除 `Article` 旧路径。
+- 不要让预览迁到 `MBDoc` 而复制/发布仍走旧路径。
+- 不要继续往 `publish.py` 塞东西；要瘦身、要下沉到 `services/`。
+- 不要把研究文档当作对当前 runtime 的精确描述。
+- 技能文档保持短；细节压进 `docs/`。
 
-## Current Fallback API Use
+## 升级触发
 
-If CLI is not present, work through HTTP directly.
+遇到以下情况停下来找用户澄清：
 
-Common flow:
+- 任务同时混合了旧路径修复和 `MBDoc` 迁移，且没有声明边界。
+- 用户要求对发布链路做 parity-critical 改动，但没有基线验证。
+- 变更需要在渲染器覆盖完成前就删除兼容层。
 
-1. create or load article through `/articles`
-2. update content and metadata
-3. preview/process through `/publish/preview`
-4. publish draft through `/publish/draft`
-5. upload and manage images through `/images`
-6. use `/mbdoc` only when task explicitly targets migration or block docs
+## 深文档指引
 
-## Recommended Agent Workflow
+不要在本 skill 里堆内容，按需读：
 
-### For user content generation now
-
-1. decide lane
-2. decide render layer for each major section
-3. create or update content through current product path
-4. preview through backend processing
-5. publish only after processed output looks correct
-
-### For migration work
-
-1. capture current behavior first
-2. isolate boundary or adapter layer
-3. keep preview/copy/publish parity
-4. add or extend tests before removing compatibility
-
-More:
-
-- `docs/agent/AGENT_WORKFLOWS.md`
-
-## CLI Transition Rule
-
-During the CLI rollout:
-
-- teach agents to prefer CLI when available
-- keep API fallback documented
-- avoid examples that claim a command exists before implementation lands
-- keep human-readable and machine-readable output separate in docs
-
-## When To Read More
-
-Read architecture docs when:
-
-- changing storage or source of truth
-- changing preview/copy/publish behavior
-- editing `publish.py`
-- adding or modifying block renderers
-- changing frontend editor state shape
-
-Read research docs when:
-
-- deciding HTML vs SVG vs raster
-- deciding what WeChat actually preserves
-- trying to make an interaction survive publish
-
-## Escalation Triggers
-
-Stop and clarify if:
-
-- the task mixes legacy fixes and `MBDoc` migration with no stated boundary
-- the user wants parity-critical publish changes without baseline validation
-- the change would require deleting compatibility before renderer coverage exists
-
-## Deliverable Style
-
-When you complete work:
-
-- state which lane you worked in
-- state whether behavior is current-path, bridge, or `MBDoc`-native
-- state what was validated and what was not
-- cite the changed files
-
-## Deep Docs
-
-Use these instead of bloating this skill:
-
-- `docs/architecture/SESSION_ONRAMP.md`
-- `docs/architecture/PROJECT_MAP.md`
-- `docs/plans/2026-04-16-mbeditor-unified-migration-plan.md`
-- `docs/plans/2026-04-16-backend-mbdoc-migration.md`
-- `docs/agent/AGENT_WORKFLOWS.md`
-- `docs/agent/RENDER_DECISIONS.md`
-- `docs/cli/CLI_OVERVIEW.md`
-- `docs/cli/CLI_ANYTHING_NOTES.md`
+- `docs/architecture/SESSION_ONRAMP.md`、`docs/architecture/PROJECT_MAP.md`
+- `docs/agent/AGENT_WORKFLOWS.md`、`docs/agent/RENDER_DECISIONS.md`
+- `docs/cli/CLI_OVERVIEW.md`、`docs/cli/CLI_ANYTHING_NOTES.md`、`docs/cli/COMMAND_REFERENCE.md`
+- `docs/plans/2026-04-16-mbeditor-unified-migration-plan.md`、`docs/plans/2026-04-16-backend-mbdoc-migration.md`

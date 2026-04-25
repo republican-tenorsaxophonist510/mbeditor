@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ArticleFull, ArticleMode, ArticleSummary } from "@/types";
-import { getSeedArticles } from "@/seeds";
+import { getRequiredSeedArticles, getSeedArticles, SEED_VERSION } from "@/seeds";
 
 const SEED_FLAG_KEY = "mbeditor.articles.seeded";
+const SEED_VERSION_KEY = "mbeditor.articles.seedVersion";
 
 function shouldSeed(): boolean {
   if (typeof window === "undefined") return false;
@@ -18,8 +19,20 @@ function markSeeded(): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SEED_FLAG_KEY, "1");
+    window.localStorage.setItem(SEED_VERSION_KEY, String(SEED_VERSION));
   } catch {
     /* storage unavailable — fall back to in-memory only */
+  }
+}
+
+function readSeededVersion(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = window.localStorage.getItem(SEED_VERSION_KEY);
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -128,17 +141,46 @@ export const useArticlesStore = create<ArticlesState>()(
       name: "mbeditor.articles",
       partialize: (state) => ({ articles: state.articles }),
       onRehydrateStorage: () => (state) => {
-        if (!shouldSeed()) return;
-        if (state && state.articles.length > 0) {
-          markSeeded();
+        // zustand persist 在 rehydrate 回调里 setState 不会触发 persist 的写回。
+        // 用 queueMicrotask 推到下一 tick：此时 rehydrate 已完成，setState 会
+        // 正常走 partialize → localStorage 写回，React 组件也会重新订阅。
+        const firstTime = shouldSeed();
+        const currentArticles = state?.articles ?? useArticlesStore.getState().articles;
+
+        if (firstTime) {
+          if (currentArticles.length > 0) {
+            markSeeded();
+            return;
+          }
+          const seeds = getSeedArticles();
+          queueMicrotask(() => {
+            useArticlesStore.setState({ articles: seeds });
+            markSeeded();
+          });
           return;
         }
-        const seeds = getSeedArticles();
-        markSeeded();
-        if (state) {
-          state.articles = seeds;
-        } else {
-          useArticlesStore.setState({ articles: seeds });
+
+        if (readSeededVersion() < SEED_VERSION) {
+          // 版本滞后时 REQUIRED_SEED_IDS 里的文章**强制**用最新内容覆盖，
+          // 保证 demo 文章内容始终跟着前端构建走（否则老用户拿到的是旧版 HTML）。
+          const required = getRequiredSeedArticles();
+          queueMicrotask(() => {
+            const current = useArticlesStore.getState().articles;
+            const byId = new Map(current.map((a) => [a.id, a] as const));
+            for (const seed of required) byId.set(seed.id, seed);
+            const next = Array.from(byId.values());
+            // Ensure the demo article leads the list on fresh sync
+            next.sort((a, b) => {
+              const ai = required.findIndex((s) => s.id === a.id);
+              const bi = required.findIndex((s) => s.id === b.id);
+              if (ai !== -1 && bi !== -1) return ai - bi;
+              if (ai !== -1) return -1;
+              if (bi !== -1) return 1;
+              return 0;
+            });
+            useArticlesStore.setState({ articles: next });
+            markSeeded();
+          });
         }
       },
     }

@@ -20,4 +20,14 @@ describe("StructurePanel outline builders", () => {
     expect(outline[1]?.sourceLine).toBe(3);
     expect(outline[2]?.previewImageIndex).toBe(0);
   });
+
+  it("treats inline <svg> blocks as image outline entries", () => {
+    const outline = buildHtmlOutline(
+      "<h1>标题</h1>\n<svg width=\"100\" height=\"50\"><rect fill=\"red\"/></svg>",
+    );
+
+    expect(outline.map((block) => block.label)).toEqual(["标题", "图片 1"]);
+    expect(outline[1]?.preview).toBe("内联 SVG");
+    expect(outline[1]?.type).toBe("image");
+  });
 });

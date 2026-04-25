@@ -251,66 +251,150 @@ function WeChatSection() {
   };
 
   return (
-    <section>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>公众号账号</h2>
-        <div>
-          <button onClick={beginAdd}>添加公众号</button>
-          <label style={{ marginLeft: 8, cursor: "pointer" }}>
-            导入旧数据
-            <input type="file" accept="application/json" onChange={handleImport} style={{ display: "none" }} />
-          </label>
+    <div style={{ maxWidth: 560 }}>
+      <SectionHeader label="公众号" />
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 20 }}>
+        <button className="btn btn-primary btn-sm" onClick={beginAdd}>添加公众号</button>
+        <label className="btn btn-ghost btn-sm" style={{ cursor: "pointer", display: "inline-flex" }}>
+          导入旧数据
+          <input type="file" accept="application/json" onChange={handleImport} style={{ display: "none" }} />
+        </label>
+        <div style={{ flex: 1 }} />
+        <button
+          className="btn btn-outline btn-sm"
+          onClick={handleTest}
+          disabled={testing || !activeAccountId}
+        >
+          {testing ? "测试中…" : "测试连接"}
+        </button>
+      </div>
+
+      {accounts.length === 0 ? (
+        <div
+          style={{
+            padding: "24px 16px",
+            border: "1px dashed var(--border)",
+            borderRadius: "var(--r-md)",
+            textAlign: "center",
+            color: "var(--fg-4)",
+            fontSize: 12,
+            marginBottom: 20,
+          }}
+        >
+          还没有公众号账号，点击「添加公众号」开始配置。
         </div>
-      </header>
-
-      <ul>
-        {accounts.map((a) => (
-          <li key={a.id} style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <input
-              type="radio"
-              name="active-account"
-              checked={activeAccountId === a.id}
-              onChange={() => setActive(a.id)}
-            />
-            <div style={{ flex: 1 }}>
-              <div>{a.name || "(未命名)"}</div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>{a.appid}</div>
-            </div>
-            <button onClick={() => beginEdit(a)}>编辑</button>
-            <button onClick={() => removeAccount(a.id)}>删除</button>
-          </li>
-        ))}
-      </ul>
-
-      <button onClick={handleTest} disabled={testing || !activeAccountId}>
-        {testing ? "测试中…" : "测试连接"}
-      </button>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "grid", gap: 8 }}>
+          {accounts.map((a) => {
+            const active = activeAccountId === a.id;
+            return (
+              <li
+                key={a.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "12px 14px",
+                  border: active ? "2px solid var(--accent)" : "1px solid var(--border)",
+                  borderRadius: "var(--r-md)",
+                  background: "var(--surface)",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="active-account"
+                  checked={active}
+                  onChange={() => setActive(a.id)}
+                  aria-label={`选择 ${a.name || a.appid}`}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: "var(--fg)", marginBottom: 2 }}>
+                    {a.name || "(未命名)"}
+                  </div>
+                  <div style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-4)" }}>
+                    {a.appid}
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => beginEdit(a)}>编辑</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => removeAccount(a.id)}>删除</button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
       {editingId && (
-        <div style={{ marginTop: 16, padding: 12, border: "1px solid var(--border)" }}>
-          <label>
-            名称
-            <input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
-          </label>
-          <label>
-            AppID
-            <input value={draft.appid} onChange={(e) => setDraft((d) => ({ ...d, appid: e.target.value }))} />
-          </label>
-          <label>
-            AppSecret
+        <div
+          style={{
+            padding: 16,
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-md)",
+            background: "var(--surface)",
+            display: "grid",
+            gap: 12,
+          }}
+        >
+          <label style={{ display: "block" }}>
+            <div style={wechatFieldLabelStyle}>名称</div>
             <input
+              aria-label="名称"
+              value={draft.name}
+              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+              style={wechatInputStyle}
+            />
+          </label>
+          <label style={{ display: "block" }}>
+            <div style={wechatFieldLabelStyle}>AppID</div>
+            <input
+              aria-label="AppID"
+              value={draft.appid}
+              onChange={(e) => setDraft((d) => ({ ...d, appid: e.target.value }))}
+              style={wechatInputStyle}
+            />
+          </label>
+          <label style={{ display: "block" }}>
+            <div style={wechatFieldLabelStyle}>AppSecret</div>
+            <input
+              aria-label="AppSecret"
               type="password"
               value={draft.appsecret}
               onChange={(e) => setDraft((d) => ({ ...d, appsecret: e.target.value }))}
+              style={wechatInputStyle}
             />
           </label>
-          <button onClick={save}>保存</button>
-          <button onClick={cancel}>取消</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button className="btn btn-primary btn-sm" onClick={save}>保存</button>
+            <button className="btn btn-ghost btn-sm" onClick={cancel}>取消</button>
+          </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
+
+const wechatFieldLabelStyle: React.CSSProperties = {
+  fontSize: 9,
+  letterSpacing: "0.12em",
+  color: "var(--fg-4)",
+  marginBottom: 4,
+  textTransform: "uppercase",
+  fontFamily: "var(--f-mono)",
+};
+
+const wechatInputStyle: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  boxSizing: "border-box",
+  fontFamily: "var(--f-mono)",
+  fontSize: 13,
+  color: "var(--fg-2)",
+  padding: "8px 0",
+  border: "none",
+  borderBottom: "1px solid var(--border)",
+  background: "transparent",
+  outline: "none",
+};
 
 /* ── Appearance Section ─────────────────────────── */
 

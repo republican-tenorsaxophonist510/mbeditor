@@ -8,9 +8,29 @@ import { useArticlesStore } from "@/stores/articlesStore";
 import { toast } from "@/stores/toastStore";
 import type { AgentMessage, ArticleFull } from "@/types";
 
+// Backend shape for POST /agent/generate-svg (see
+// backend/app/services/agent_svg_prompt.py). Status lives in the body —
+// HTTP is always 200 so axios never throws for "failed" generations.
+interface SvgGenerateReport {
+  issues: Array<{ line: number; rule: string; message: string; suggestion: string }>;
+  warnings: Array<{ line: number; rule: string; message: string; suggestion: string }>;
+  stats: Record<string, number>;
+}
+interface SvgGenerateResult {
+  status: "ok" | "failed";
+  html: string;
+  warnings: Array<{ kind: string; message?: string; rule?: string }>;
+  report: SvgGenerateReport;
+  attempts: number;
+}
+
 // ── Named export: standalone publish-capable component used by tests ──
 export function AgentCopilot() {
   const [publishing, setPublishing] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [svgPromptOpen, setSvgPromptOpen] = useState(false);
+  const [svgPrompt, setSvgPrompt] = useState("");
+  const [svgError, setSvgError] = useState<SvgGenerateReport | null>(null);
 
   const handlePublish = async () => {
     const active = useWeChatStore.getState().getActiveAccount();
@@ -48,14 +68,147 @@ export function AgentCopilot() {
     }
   };
 
+  const handleGenerateSvg = async () => {
+    const prompt = svgPrompt.trim();
+    if (!prompt) {
+      toast.error("请先描述你想要的交互");
+      return;
+    }
+    const currentId = useArticlesStore.getState().currentArticleId;
+    const article = useArticlesStore.getState().articles.find((a) => a.id === currentId) as
+      | ArticleFull
+      | undefined;
+    if (!article) {
+      toast.error("没有选中的文章");
+      return;
+    }
+    setGenerating(true);
+    setSvgError(null);
+    try {
+      const resp = await api.post("/agent/generate-svg", { prompt });
+      const payload = resp.data as { code: number; data: SvgGenerateResult };
+      const result = payload.data;
+      if (result.status === "ok" && result.html) {
+        // No cursor API available on ArticleFull — append to article.html.
+        const nextHtml = (article.html ?? "") + "\n" + result.html;
+        await useArticlesStore.getState().updateArticle(article.id, { html: nextHtml });
+        toast.success("已插入交互积木");
+        setSvgPromptOpen(false);
+        setSvgPrompt("");
+      } else {
+        setSvgError(result.report);
+        toast.error("生成失败，请查看报告");
+      }
+    } catch {
+      toast.error("生成接口调用失败");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
-    <button
-      className="btn btn-primary btn-sm"
-      onClick={handlePublish}
-      disabled={publishing}
-    >
-      推送到草稿
-    </button>
+    <>
+      <button
+        className="btn btn-primary btn-sm"
+        onClick={handlePublish}
+        disabled={publishing}
+      >
+        推送到草稿
+      </button>
+      <button
+        className="btn btn-outline btn-sm"
+        onClick={() => setSvgPromptOpen(true)}
+        disabled={generating}
+        style={{ marginLeft: 8 }}
+      >
+        生成交互 SVG 积木
+      </button>
+
+      {svgPromptOpen && (
+        <div
+          role="dialog"
+          aria-label="生成交互 SVG 积木"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "var(--surface, #fff)",
+              padding: 20,
+              borderRadius: 12,
+              minWidth: 420,
+              maxWidth: 560,
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>
+              生成交互 SVG 积木
+            </div>
+            <input
+              autoFocus
+              value={svgPrompt}
+              onChange={(e) => setSvgPrompt(e.target.value)}
+              placeholder="你想做什么样的交互？（如：10 题年终共鸣投票 / 产品剖面图热点展开 / FAQ 手风琴）"
+              aria-label="interaction prompt"
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                border: "1px solid var(--border-2, #ddd)",
+                borderRadius: 8,
+                fontSize: 13,
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleGenerateSvg();
+                if (e.key === "Escape") setSvgPromptOpen(false);
+              }}
+            />
+            {svgError && svgError.issues.length > 0 && (
+              <div
+                role="alert"
+                style={{
+                  marginTop: 12,
+                  padding: 10,
+                  background: "var(--surface-2, #fff4f4)",
+                  border: "1px solid var(--warn, #e55)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  maxHeight: 200,
+                  overflow: "auto",
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>校验未通过（{svgError.issues.length} 处）</div>
+                {svgError.issues.map((iss, i) => (
+                  <div key={i} style={{ marginBottom: 4 }}>
+                    [行 {iss.line}] {iss.rule}: {iss.message}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setSvgPromptOpen(false)}
+                disabled={generating}
+              >
+                取消
+              </button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={handleGenerateSvg}
+                disabled={generating}
+              >
+                {generating ? "生成中…" : "生成"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -71,7 +224,7 @@ const MOCK_AGENT_STREAM: AgentMessage[] = [
   { t: "17:04:05", kind: "assistant", text: "已经按公众号兼容规则处理好了，可以继续预览或发到草稿箱。" },
 ];
 
-const SUGGESTED_ACTIONS = ["生成封面", "润色开头", "插入对比表", "发到草稿箱"];
+const SUGGESTED_ACTIONS = ["生成封面", "润色开头", "插入对比表", "生成交互 SVG 积木", "发到草稿箱"];
 
 // ── Stream item renderer ──
 function AgentStreamItem({ e }: { e: AgentMessage }) {

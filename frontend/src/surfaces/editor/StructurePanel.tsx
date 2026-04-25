@@ -1,6 +1,9 @@
-import { useEffect, useMemo, type ReactNode } from "react";
-import { IconDoc, IconList, IconImage, IconCpu, IconTerminal } from "@/components/icons";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { IconDoc, IconList, IconImage, IconCpu, IconTerminal, IconSparkle } from "@/components/icons";
 import Seg from "@/components/ui/Seg";
+import { useArticlesStore } from "@/stores/articlesStore";
+import { toast } from "@/stores/toastStore";
+import { TemplateGallery, type Template } from "@/features/editor/template-gallery";
 import type { ArticleMode, EditorDraft } from "@/types";
 
 export interface OutlineBlock {
@@ -38,10 +41,23 @@ function lineNumberForOffset(source: string, offset: number) {
   return source.slice(0, offset).split("\n").length;
 }
 
+const INLINE_SVG_RE = /<svg\b[^>]*>[\s\S]*?<\/svg>/gi;
+
+function svgToDataUrl(svg: string): string {
+  // encodeURIComponent handles non-ASCII (Chinese text inside <text> etc.);
+  // btoa would throw on those. The ``utf8`` marker tells browsers to treat the
+  // payload as a text SVG rather than base64.
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 function extractAssets(draft: EditorDraft) {
   const htmlMatches = Array.from(draft.html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi), (match) => match[1]);
   const markdownMatches = Array.from(draft.markdown.matchAll(/!\[[^\]]*]\(([^)]+)\)/g), (match) => match[1]);
-  return Array.from(new Set([...htmlMatches, ...markdownMatches])).slice(0, 6);
+  // Inline <svg> blocks render as images in the preview iframe, so the panel
+  // must treat them as assets too — the publish pipeline rasterizes them to
+  // PNG before sending to WeChat.
+  const svgMatches = Array.from(draft.html.matchAll(INLINE_SVG_RE), (match) => svgToDataUrl(match[0]));
+  return Array.from(new Set([...htmlMatches, ...markdownMatches, ...svgMatches])).slice(0, 6);
 }
 
 export function buildMarkdownOutline(markdown: string): OutlineBlock[] {
@@ -121,14 +137,18 @@ export function buildHtmlOutline(html: string): OutlineBlock[] {
     });
   });
 
-  const imageMatches = Array.from(html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi));
-  imageMatches.slice(0, 2).forEach((match, index) => {
+  const imageLikeMatches = [
+    ...Array.from(html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)),
+    ...Array.from(html.matchAll(INLINE_SVG_RE)),
+  ].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  imageLikeMatches.slice(0, 2).forEach((match, index) => {
     const sourceOffset = match.index ?? 0;
+    const isSvg = match[0].toLowerCase().startsWith("<svg");
     blocks.push({
       id: `html-image-${index}`,
       type: "image",
       label: `图片 ${index + 1}`,
-      preview: "已插入图片",
+      preview: isSvg ? "内联 SVG" : "已插入图片",
       depth: 1,
       sourceOffset,
       sourceLine: lineNumberForOffset(html, sourceOffset),
@@ -187,7 +207,17 @@ interface StructurePanelProps {
   onSelectBlock?: (block: OutlineBlock) => void;
   onTitleChange: (title: string) => void;
   onModeChange: (mode: ArticleMode) => void;
+  /**
+   * 可选：当模板画廊插入 HTML 时调用。
+   * - 若父组件提供：优先走父组件的本地 draft 更新路径（不触发刷新）
+   * - 若未提供：StructurePanel 会直接走 articlesStore.updateArticle，然后清掉
+   *   sessionStorage 里的 draft 并 reload，让 EditorSurface 重新拉出新 html
+   */
+  onInsertHtml?: (html: string) => void;
 }
+
+/** 与 EditorSurface 里 `draftStorageKey` 保持一致，避免插入后旧草稿把新 html 顶回去 */
+const DRAFT_STORAGE_PREFIX = "mbeditor.editorDraft.";
 
 export default function StructurePanel({
   articleId,
@@ -197,11 +227,54 @@ export default function StructurePanel({
   onSelectBlock,
   onTitleChange,
   onModeChange,
+  onInsertHtml,
 }: StructurePanelProps) {
+  const updateArticle = useArticlesStore((state) => state.updateArticle);
+  const [templateGalleryOpen, setTemplateGalleryOpen] = useState(false);
+
   const outline = useMemo(() => buildOutlineFromDraft(draft), [draft]);
 
   const assets = useMemo(() => extractAssets(draft), [draft.html, draft.markdown]);
   const wordCount = useMemo(() => countWords(draft), [draft]);
+
+  const handleInsertTemplate = async (template: Template) => {
+    // 优先走父组件 —— 如果 EditorSurface 有一天把 onInsertHtml 接上，插入
+    // 就是一次局部 state 更新，体验最丝滑（无刷新、无竞态）。
+    if (onInsertHtml) {
+      onInsertHtml(template.html);
+      setTemplateGalleryOpen(false);
+      toast.success(`已插入模板 ${template.title}`);
+      return;
+    }
+
+    // Fallback —— 没接 callback 时直接改 store。为了不被 EditorSurface 里
+    // sessionStorage 里残留的旧 draft 顶回去，插入前先把 draft key 清掉，
+    // 再 reload 让 EditorSurface 从 articlesStore 重新拉最新 html。
+    if (!articleId) {
+      toast.error("未打开文章，无法插入模板");
+      return;
+    }
+
+    try {
+      await updateArticle(articleId, { html: template.html, mode: "html" });
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem(`${DRAFT_STORAGE_PREFIX}${articleId}`);
+        } catch {
+          /* sessionStorage unavailable — ignore */
+        }
+      }
+      setTemplateGalleryOpen(false);
+      toast.success(`已插入模板 ${template.title}`);
+      if (typeof window !== "undefined") {
+        // 给 toast 一帧显示的时间再 reload，避免用户看不到提示
+        window.setTimeout(() => window.location.reload(), 160);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "插入失败";
+      toast.error(message);
+    }
+  };
 
   useEffect(() => {
     if (outline.length === 0) {
@@ -214,6 +287,7 @@ export default function StructurePanel({
   }, [outline, selected, setSelected]);
 
   return (
+    <>
     <div
       style={{
         display: "flex",
@@ -347,6 +421,32 @@ export default function StructurePanel({
         </div>
       </div>
 
+      <div style={{ padding: "12px 20px 6px", borderBottom: "1px solid var(--border)" }}>
+        <div className="caps" style={{ marginBottom: 8 }}>
+          模板
+        </div>
+        <button
+          type="button"
+          onClick={() => setTemplateGalleryOpen(true)}
+          className="btn btn-outline btn-sm"
+          style={{
+            width: "100%",
+            justifyContent: "center",
+            marginBottom: 8,
+          }}
+          title="从 5 个生产级 WeChat-SVG 模板中挑一个插入当前文章"
+        >
+          <IconSparkle size={12} />
+          插入模板
+        </button>
+        <div
+          className="mono"
+          style={{ fontSize: 9, color: "var(--fg-5)", letterSpacing: "0.08em", lineHeight: 1.5 }}
+        >
+          5 个预校验模板 · 覆盖正文，保留标题
+        </div>
+      </div>
+
       <div style={{ padding: "14px 20px 14px" }}>
         <div className="caps" style={{ marginBottom: 10 }}>
           图片
@@ -419,5 +519,13 @@ export default function StructurePanel({
         <span>{wordCount.toLocaleString()} 字</span>
       </div>
     </div>
+
+    <TemplateGallery
+      open={templateGalleryOpen}
+      currentHtmlLength={draft.html.length}
+      onClose={() => setTemplateGalleryOpen(false)}
+      onInsert={handleInsertTemplate}
+    />
+    </>
   );
 }

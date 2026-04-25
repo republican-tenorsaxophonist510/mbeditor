@@ -56,21 +56,14 @@ backend/tests/visual/_artifacts/
 data/mbdocs/
 memory/
 
-# Local scratch dropped at repo root (zipped exports, screenshots, design handoffs)
+# Local scratch dropped at repo root (zipped exports, screenshots, design
+# handoffs). Catches every *.png / *.jpg / *.jpeg at the repo root — any image
+# meant to ship needs to live under docs/, frontend/, or backend/.
 /MBEditor/
 /MBEditor.zip
-/mbeditor-*.png
-/mbeditor-*.jpeg
-/editor-*.png
-/editor-*.jpeg
-/preview-*.png
-/preview-*.jpeg
-/gh-*.png
-/gh-*.jpeg
-/prod-*.png
-/prod-*.jpeg
-/plan-*-playwright-*.png
-/plan-*-playwright-*.jpeg
+/*.png
+/*.jpg
+/*.jpeg
 
 # Local git worktrees (per-branch physical checkouts, not portable)
 .worktrees/

@@ -284,9 +284,20 @@ body { overflow: hidden; }
   70%  { box-shadow: 0 0 0 8px rgba(107, 152, 114, 0); }
   100% { box-shadow: 0 0 0 0 rgba(107, 152, 114, 0); }
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .fade-in { animation: fade-in 0.25s ease-out; }
 .slide-up { animation: slide-up 0.25s ease-out both; }
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
 
 .caret::after {
   content: "\u258C";
